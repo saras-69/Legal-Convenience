@@ -17,11 +17,6 @@ class AppServiceProvider extends ServiceProvider
     /**
      * Bootstrap any application services.
      */
-
-    protected $policies = [
-        Service::class => ServicePolicy::class,
-        Booking::class => BookingPolicy::class,
-    ];
     public function boot(): void
     {
         //

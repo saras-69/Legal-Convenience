@@ -99,7 +99,12 @@
             </div>
             <div class="card-body text-center">
                 <div class="mb-3">
-                    <img src="https://via.placeholder.com/150" alt="{{ $service->lsp->name }}" class="rounded-circle">
+                    <img 
+                        src="https://cdn-icons-png.flaticon.com/512/3135/3135715.png" 
+                        alt="{{ $service->lsp->name }}" 
+                        class="rounded-circle img-thumbnail shadow-sm" 
+                        style="width: 100px; height: 100px; object-fit: cover;"
+                    >
                 </div>
                 <h5>{{ $service->lsp->name }}</h5>
                 <p class="text-muted">{{ ucfirst($service->lsp->lspProfile->service_type) }}</p>
