@@ -1,4 +1,5 @@
 <?php
+// filepath: c:\Users\saket\Documents\int221\legal-convenience\app\Http\Controllers\BookingController.php
 
 namespace App\Http\Controllers;
 
@@ -8,6 +9,8 @@ use App\Models\Reward;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
+use Razorpay\Api\Api;
+use Illuminate\Support\Str;
 
 class BookingController extends Controller
 {
@@ -18,42 +21,93 @@ class BookingController extends Controller
 
     public function store(Request $request, Service $service)
     {
-        $validator = Validator::make($request->all(), [
+        $request->validate([
             'booking_date' => 'required|date|after_or_equal:today',
             'booking_time' => 'required',
             'notes' => 'nullable|string|max:500',
         ]);
-
-        if ($validator->fails()) {
-            return redirect()->back()->withErrors($validator)->withInput();
-        }
-
-        $user = Auth::user();
-
-        $booking = Booking::create([
-            'citizen_id' => $user->id,
-            'lsp_id' => $service->lsp_id,
-            'service_id' => $service->id,
-            'booking_date' => $request->booking_date,
-            'booking_time' => $request->booking_time,
-            'status' => 'pending',
-            'payment_status' => 'pending',
-            'amount' => $service->price,
-            'notes' => $request->notes,
-        ]);
-
-        // For demo purposes, we'll mark the payment as paid
-        // In a real application, you would integrate with a payment gateway
-        $booking->payment_status = 'paid';
-        $booking->transaction_id = 'DEMO_' . uniqid();
+        
+        // Calculate the total amount
+        $amount = $service->price * 1.05; // Adding 5% platform fee
+        
+        // Create a booking record with pending payment status
+        $booking = new Booking();
+        $booking->citizen_id = Auth::id();
+        $booking->lsp_id = $service->lsp_id;
+        $booking->service_id = $service->id;
+        $booking->booking_date = $request->booking_date;
+        $booking->booking_time = $request->booking_time;
+        $booking->status = 'pending';
+        $booking->payment_status = 'pending';
+        $booking->amount = $amount;
+        $booking->notes = $request->notes;
         $booking->save();
-
-        return redirect()->route('bookings.show', $booking)->with('success', 'Booking created successfully!');
+        
+        // Initialize Razorpay API
+        $api = new Api(config('razorpay.key_id'), config('razorpay.key_secret'));
+        
+        // Create Razorpay Order
+        $orderData = [
+            'receipt' => 'booking_' . $booking->id,
+            'amount' => (int)($amount * 100), // Amount in paisa as integer
+            'currency' => config('razorpay.currency'),
+            'payment_capture' => 1 // Auto capture
+        ];
+        
+        try {
+            $razorpayOrder = $api->order->create($orderData);
+            
+            // Return checkout view with Razorpay data
+            return view('bookings.checkout', [
+                'booking' => $booking,
+                'razorpayOrder' => $razorpayOrder,
+                'razorpayId' => config('razorpay.key_id'),
+                'amount' => $amount,
+                'service' => $service,
+                'user' => Auth::user(),
+            ]);
+        } catch (\Exception $e) {
+            $booking->delete(); // Remove the booking if order creation failed
+            return redirect()->back()->with('error', 'Payment initialization failed: ' . $e->getMessage());
+        }
     }
-
+    
+    public function complete(Request $request, Booking $booking)
+    {
+        $request->validate([
+            'razorpay_payment_id' => 'required',
+            'razorpay_order_id' => 'required',
+            'razorpay_signature' => 'required',
+        ]);
+        
+        // Verify the payment signature
+        $api = new Api(config('razorpay.key_id'), config('razorpay.key_secret'));
+        
+        try {
+            $attributes = [
+                'razorpay_payment_id' => $request->razorpay_payment_id,
+                'razorpay_order_id' => $request->razorpay_order_id,
+                'razorpay_signature' => $request->razorpay_signature,
+            ];
+            
+            $api->utility->verifyPaymentSignature($attributes);
+            
+            // Update the booking
+            $booking->payment_status = 'paid';
+            $booking->transaction_id = $request->razorpay_payment_id;
+            $booking->save();
+            
+            return redirect()->route('bookings.show', $booking)->with('success', 'Payment successful and booking confirmed!');
+        } catch (\Exception $e) {
+            return redirect()->route('bookings.show', $booking)->with('error', 'Payment verification failed: ' . $e->getMessage());
+        }
+    }
+ 
     public function show(Booking $booking)
     {
-        $this->authorize('view', $booking);
+        if (Auth::user()->cannot('view', $booking)) {
+            abort(403, 'Unauthorized action.');
+        }
         
         $booking->load('service', 'lsp', 'citizen');
         
@@ -66,52 +120,66 @@ class BookingController extends Controller
         
         if ($user->role === 'citizen') {
             $bookings = Booking::where('citizen_id', $user->id)
-                ->with('service', 'lsp')
                 ->orderBy('created_at', 'desc')
+                ->with(['service', 'lsp'])
                 ->get();
-                
-            return view('bookings.citizen-index', compact('bookings'));
         } elseif ($user->role === 'lsp') {
             $bookings = Booking::where('lsp_id', $user->id)
-                ->with('service', 'citizen')
                 ->orderBy('created_at', 'desc')
+                ->with(['service', 'citizen'])
                 ->get();
-                
-            return view('bookings.lsp-index', compact('bookings'));
+        } elseif ($user->role === 'admin') {
+            $bookings = Booking::orderBy('created_at', 'desc')
+                ->with(['service', 'lsp', 'citizen'])
+                ->get();
+        } else {
+            abort(403, 'Unauthorized action.');
         }
         
-        return redirect()->route('home')->with('error', 'Unauthorized access');
+        return view('bookings.index', compact('bookings'));
     }
-
-    public function updateStatus(Request $request, Booking $booking)
+    
+    public function cancel(Request $request, Booking $booking)
     {
-        $this->authorize('update', $booking);
-        
-        $validator = Validator::make($request->all(), [
-            'status' => 'required|in:confirmed,completed,cancelled',
-            'cancellation_reason' => 'required_if:status,cancelled',
-        ]);
-
-        if ($validator->fails()) {
-            return redirect()->back()->withErrors($validator);
+        if (Auth::user()->cannot('cancel', $booking)) {
+            abort(403, 'Unauthorized action.');
         }
-
-        $booking->status = $request->status;
         
-        if ($request->status === 'cancelled') {
+        $booking->status = 'cancelled';
+        
+        if ($request->has('cancellation_reason')) {
             $booking->cancellation_reason = $request->cancellation_reason;
         }
         
+        if ($booking->payment_status === 'paid') {
+            // In a real application, you would integrate with Razorpay's refund API here
+            // $booking->refund_status = 'pending';
+        }
+        
         $booking->save();
+        
+        return redirect()->route('bookings.show', $booking)
+            ->with('success', 'Booking has been cancelled.');
+    }
 
+    public function update(Request $request, Booking $booking)
+    {
+        if (Auth::user()->cannot('update', $booking)) {
+            abort(403, 'Unauthorized action.');
+        }
+        
+        $booking->status = $request->status;
+        $booking->save();
+        
         // Award points if the booking is completed
         if ($request->status === 'completed') {
             $this->awardPoints($booking);
         }
-
-        return redirect()->back()->with('success', 'Booking status updated successfully!');
+        
+        return redirect()->route('bookings.show', $booking)
+            ->with('success', 'Booking status has been updated.');
     }
-
+    
     private function awardPoints(Booking $booking)
     {
         // Award points to LSP

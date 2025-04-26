@@ -40,83 +40,48 @@ Route::post('/verify-otp', [AuthController::class, 'verifyOTP'])->name('verify.o
 Route::middleware(['auth'])->group(function () {
     Route::get('/home', [HomeController::class, 'index'])->name('home');
     
-    // Citizen routes - keep as is for now
+    // Shared routes that need authentication
+    Route::get('/bookings/create/{service}', [BookingController::class, 'create'])->name('bookings.create');
+    Route::post('/bookings/store/{service}', [BookingController::class, 'store'])->name('bookings.store');
+    Route::get('/bookings/{booking}', [BookingController::class, 'show'])->name('bookings.show');
+    Route::put('/bookings/{booking}/cancel', [BookingController::class, 'cancel'])->name('bookings.cancel');
+    Route::put('/bookings/{booking}', [BookingController::class, 'update'])->name('bookings.update');
+    Route::post('/bookings/{booking}/complete', [BookingController::class, 'complete'])->name('bookings.complete');
+    
+    Route::get('/rewards', [RewardController::class, 'index'])->name('rewards.index');
+    Route::post('/rewards/redeem', [RewardController::class, 'redeem'])->name('rewards.redeem');
+    
+    // Citizen routes
     Route::middleware(['role:citizen'])->group(function () {
-        Route::get('/bookings/create/{service}', [BookingController::class, 'create'])->name('bookings.create');
-        Route::post('/bookings/{service}', [BookingController::class, 'store'])->name('bookings.store');
         Route::get('/my-bookings', [BookingController::class, 'index'])->name('citizen.bookings');
         Route::post('/reviews/{booking}', [ReviewController::class, 'store'])->name('reviews.store');
     });
     
-    // LSP routes - change to individual routes temporarily
-    // Comment out the group middleware
-    // Route::middleware(['role:lsp'])->group(function () {
+    // LSP routes
+    Route::middleware(['role:lsp'])->group(function () {
+        Route::get('/lsp/dashboard', function () {
+            return view('lsp.dashboard');
+        })->name('lsp.dashboard');
         
-    // Add auth middleware to each route individually for testing
-    Route::get('/lsp/dashboard', function () {
-        return view('lsp.dashboard');
-    })->middleware(['auth'])->name('lsp.dashboard');
-    
-    // Profile management - with explicit middleware
-    Route::get('/lsp/profile/create', [LspProfileController::class, 'create'])
-        ->middleware(['auth'])
-        ->name('lsp.profile.create');
+        // Profile management
+        Route::get('/lsp/profile/create', [LspProfileController::class, 'create'])->name('lsp.profile.create');
+        Route::post('/lsp/profile', [LspProfileController::class, 'store'])->name('lsp.profile.store');
+        Route::get('/lsp/profile/edit', [LspProfileController::class, 'edit'])->name('lsp.profile.edit');
+        Route::put('/lsp/profile', [LspProfileController::class, 'update'])->name('lsp.profile.update');
         
-    Route::post('/lsp/profile', [LspProfileController::class, 'store'])
-        ->middleware(['auth'])
-        ->name('lsp.profile.store');
-    
-    Route::get('/lsp/profile/edit', [LspProfileController::class, 'edit'])
-        ->middleware(['auth'])
-        ->name('lsp.profile.edit');
-    
-    Route::put('/lsp/profile', [LspProfileController::class, 'update'])
-        ->middleware(['auth'])
-        ->name('lsp.profile.update');
-    
-    // Rest of LSP routes with auth middleware
-    Route::get('/lsp/services', [ServiceController::class, 'index'])
-        ->middleware(['auth'])
-        ->name('lsp.services.index');
+        // Service management
+        Route::get('/lsp/services', [ServiceController::class, 'index'])->name('lsp.services.index');
+        Route::get('/lsp/services/create', [ServiceController::class, 'create'])->name('lsp.services.create');
+        Route::post('/lsp/services', [ServiceController::class, 'store'])->name('lsp.services.store');
+        Route::get('/lsp/services/{service}/edit', [ServiceController::class, 'edit'])->name('lsp.services.edit');
+        Route::put('/lsp/services/{service}', [ServiceController::class, 'update'])->name('lsp.services.update');
+        Route::delete('/lsp/services/{service}', [ServiceController::class, 'destroy'])->name('lsp.services.destroy');
         
-    Route::get('/lsp/services/create', [ServiceController::class, 'create'])
-        ->middleware(['auth'])
-        ->name('lsp.services.create');
-        
-    Route::post('/lsp/services', [ServiceController::class, 'store'])
-        ->middleware(['auth'])
-        ->name('lsp.services.store');
-        
-    Route::get('/lsp/services/{service}/edit', [ServiceController::class, 'edit'])
-        ->middleware(['auth'])
-        ->name('lsp.services.edit');
-        
-    Route::put('/lsp/services/{service}', [ServiceController::class, 'update'])
-        ->middleware(['auth'])
-        ->name('lsp.services.update');
-        
-    Route::delete('/lsp/services/{service}', [ServiceController::class, 'destroy'])
-        ->middleware(['auth'])
-        ->name('lsp.services.destroy');
-        
-    // Booking management
-    Route::get('/lsp/bookings', [BookingController::class, 'index'])
-        ->middleware(['auth'])
-        ->name('lsp.bookings');
-        
-    Route::put('/lsp/bookings/{booking}/status', [BookingController::class, 'updateStatus'])
-        ->middleware(['auth'])
-        ->name('lsp.bookings.status');
-        
-    Route::post('/lsp/reviews/{review}/respond', [ReviewController::class, 'respond'])
-        ->middleware(['auth'])
-        ->name('lsp.reviews.respond');
-    // }); // End of LSP group comment
-    
-    // Shared routes
-    Route::get('/bookings/{booking}', [BookingController::class, 'show'])->name('bookings.show');
-    Route::get('/rewards', [RewardController::class, 'index'])->name('rewards.index');
-    Route::post('/rewards/redeem', [RewardController::class, 'redeem'])->name('rewards.redeem');
+        // Booking management
+        Route::get('/lsp/bookings', [BookingController::class, 'index'])->name('lsp.bookings');
+        Route::put('/lsp/bookings/{booking}/status', [BookingController::class, 'updateStatus'])->name('lsp.bookings.status');
+        Route::post('/lsp/reviews/{review}/respond', [ReviewController::class, 'respond'])->name('lsp.reviews.respond');
+    });
     
     // Admin routes
     Route::middleware(['role:admin'])->group(function () {
@@ -125,6 +90,6 @@ Route::middleware(['auth'])->group(function () {
         Route::post('/admin/verify/{profile}', [AdminController::class, 'verifyLsp'])->name('admin.verify');
         Route::get('/admin/users', [AdminController::class, 'users'])->name('admin.users');
         Route::get('/admin/services', [AdminController::class, 'services'])->name('admin.services');
-        Route::get('/admin/bookings', [AdminController::class, 'bookings'])->name('admin.bookings');
+        Route::get('/admin/bookings', [BookingController::class, 'index'])->name('admin.bookings');
     });
 });
